@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 
 type Result = {
   videoId: string;
-  title: string | null;
   filename: string | null;
   content: string | null;
   error: string | null;
@@ -13,20 +12,17 @@ export default function Home() {
   const [languageCode, setLanguageCode] = useState('en');
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false);
+  const [titles, setTitles] = useState<Record<string, string>>({}); // videoId -> title
 
   useEffect(() => {
-    const lang = navigator.language.slice(0, 2).toLowerCase();
-    const supportedLangs = ['en', 'pt', 'es', 'fr', 'de'];
-    if (supportedLangs.includes(lang)) {
-      setLanguageCode(lang);
-    } else {
-      setLanguageCode('en');
-    }
+    // Detecta idioma do navegador, pega só os dois primeiros chars
+    const lang = navigator.language.slice(0, 2);
+    setLanguageCode(lang);
   }, []);
 
   function parseVideoIds(text: string): string[] {
     const regex = /(?:v=|\/)([a-zA-Z0-9_-]{11})/g;
-    const ids: string[] = [];
+    const ids: string[] = [];  // <-- define tipo explicitamente
     let match;
     while ((match = regex.exec(text)) !== null) {
       ids.push(match[1]);
@@ -43,6 +39,7 @@ export default function Home() {
   async function handleSubmit() {
     setLoading(true);
     setResults([]);
+    setTitles({});
 
     const videoIds = parseVideoIds(input).slice(0, 10);
     if (videoIds.length === 0) {
@@ -58,7 +55,20 @@ export default function Home() {
         body: JSON.stringify({ videoIds, languageCode }),
       });
       const data = await res.json();
+
       setResults(data.results);
+
+      // Monta um mapa videoId -> título para exibir
+      const mapTitles: Record<string, string> = {};
+      data.results.forEach((r: Result) => {
+        if (r.filename) {
+          // filename é algo tipo "Título_abc123.txt", extrai só o título
+          mapTitles[r.videoId] = r.filename.replace(/_[^_]+\.txt$/, '');
+        } else {
+          mapTitles[r.videoId] = r.videoId;
+        }
+      });
+      setTitles(mapTitles);
     } catch (error) {
       alert('Erro ao chamar API');
     } finally {
@@ -108,22 +118,24 @@ export default function Home() {
       </button>
 
       <div style={{ marginTop: 20 }}>
-        {results.map(({ videoId, title, filename, content, error }) => (
+        {results.map(({ videoId, filename, content, error }) => (
           <div
             key={videoId}
-            style={{ marginBottom: 15, borderBottom: '1px solid #ccc', paddingBottom: 10 }}
+            style={{ marginBottom: 15, borderBottom: '1px solid #ccc', paddingBottom: 8 }}
           >
-            <strong>Vídeo:</strong> {title || videoId} <br />
+            <strong>Vídeo:</strong> {titles[videoId] || videoId} <br />
             {error ? (
               <span style={{ color: 'red' }}>Erro: {error}</span>
             ) : (
-              <button
-                onClick={() => {
-                  if (filename && content) downloadFile(filename, content);
-                }}
-              >
-                Baixar {filename}
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    if (filename && content) downloadFile(filename, content);
+                  }}
+                >
+                  Baixar {filename}
+                </button>
+              </>
             )}
           </div>
         ))}
