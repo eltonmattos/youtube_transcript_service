@@ -1,10 +1,11 @@
+// pages/index.tsx
 import { useState, useEffect } from 'react';
 
 type Result = {
   videoId: string;
-  filename: string | null;
-  content: string | null;
-  error: string | null;
+  transcript?: string;
+  error?: string;
+  title?: string;
 };
 
 export default function Home() {
@@ -12,17 +13,15 @@ export default function Home() {
   const [languageCode, setLanguageCode] = useState('en');
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false);
-  const [titles, setTitles] = useState<Record<string, string>>({}); // videoId -> title
 
   useEffect(() => {
-    // Detecta idioma do navegador, pega só os dois primeiros chars
     const lang = navigator.language.slice(0, 2);
     setLanguageCode(lang);
   }, []);
 
   function parseVideoIds(text: string): string[] {
     const regex = /(?:v=|\/)([a-zA-Z0-9_-]{11})/g;
-    const ids: string[] = [];  // <-- define tipo explicitamente
+    const ids = [];
     let match;
     while ((match = regex.exec(text)) !== null) {
       ids.push(match[1]);
@@ -39,7 +38,6 @@ export default function Home() {
   async function handleSubmit() {
     setLoading(true);
     setResults([]);
-    setTitles({});
 
     const videoIds = parseVideoIds(input).slice(0, 10);
     if (videoIds.length === 0) {
@@ -55,21 +53,8 @@ export default function Home() {
         body: JSON.stringify({ videoIds, languageCode }),
       });
       const data = await res.json();
-
       setResults(data.results);
-
-      // Monta um mapa videoId -> título para exibir
-      const mapTitles: Record<string, string> = {};
-      data.results.forEach((r: Result) => {
-        if (r.filename) {
-          // filename é algo tipo "Título_abc123.txt", extrai só o título
-          mapTitles[r.videoId] = r.filename.replace(/_[^_]+\.txt$/, '');
-        } else {
-          mapTitles[r.videoId] = r.videoId;
-        }
-      });
-      setTitles(mapTitles);
-    } catch (error) {
+    } catch {
       alert('Erro ao chamar API');
     } finally {
       setLoading(false);
@@ -118,22 +103,23 @@ export default function Home() {
       </button>
 
       <div style={{ marginTop: 20 }}>
-        {results.map(({ videoId, filename, content, error }) => (
+        {results.map(({ videoId, transcript, error }) => (
           <div
             key={videoId}
-            style={{ marginBottom: 15, borderBottom: '1px solid #ccc', paddingBottom: 8 }}
+            style={{ marginBottom: 15, borderBottom: '1px solid #ccc', paddingBottom: 10 }}
           >
-            <strong>Vídeo:</strong> {titles[videoId] || videoId} <br />
+            <strong>Vídeo:</strong> {videoId}
+            <br />
             {error ? (
               <span style={{ color: 'red' }}>Erro: {error}</span>
             ) : (
               <>
                 <button
                   onClick={() => {
-                    if (filename && content) downloadFile(filename, content);
+                    if (transcript) downloadFile(`${videoId}.txt`, transcript);
                   }}
                 >
-                  Baixar {filename}
+                  Baixar transcrição
                 </button>
               </>
             )}

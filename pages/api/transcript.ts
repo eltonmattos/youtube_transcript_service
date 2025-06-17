@@ -1,86 +1,58 @@
+// pages/api/transcript.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import fetch from 'node-fetch';
-import * as cheerio from 'cheerio';
 
-type TranscriptSegment = {
-  text: string;
-  start: number;
-  duration: number;
-};
-
-type Result = {
+type TranscriptResult = {
   videoId: string;
-  filename: string | null;
-  content: string | null;
-  error: string | null;
+  transcript?: string;
+  error?: string;
 };
 
-function sanitizeFilename(name: string) {
-  return name.replace(/[<>:"/\\|?*]+/g, '_');
+async function fetchVideoPage(videoId: string): Promise<string> {
+  const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+    headers: {
+      // user-agent para evitar bloqueio simples
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    },
+  });
+  if (!res.ok) throw new Error('Failed to fetch video page');
+  return await res.text();
 }
 
-async function fetchVideoTitle(videoId: string): Promise<string> {
-  const url = `https://www.youtube.com/watch?v=${videoId}`;
+function extractInitialPlayerResponse(html: string): any | null {
+  const match = html.match(/var ytInitialPlayerResponse = (.*?);<\/script>/s);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchTranscriptText(url: string): Promise<string> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error('Erro ao buscar página do vídeo');
-  const html = await res.text();
-  const $ = cheerio.load(html);
-  let title = $('title').text() || `video_${videoId}`;
-  title = title.replace(/\s*-\s*YouTube$/, '').trim();
-  return title;
+  if (!res.ok) throw new Error('Failed to fetch transcript XML');
+  const xml = await res.text();
+
+  // Extrai o texto do XML (exemplo simplificado)
+  const regex = /<text.+?>(.*?)<\/text>/g;
+  let result = '';
+  let match;
+  while ((match = regex.exec(xml)) !== null) {
+    // Substitui entidades HTML
+    const text = match[1]
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+    result += text + '\n';
+  }
+  return result.trim();
 }
 
-interface TranscriptEvent {
-  tStartMs: number;
-  dDurationMs?: number;
-  segs: { utf8: string }[];
-}
-
-interface TranscriptData {
-  events: TranscriptEvent[];
-}
-
-async function fetchTranscript(videoId: string, langCode: string): Promise<TranscriptSegment[]> {
-  const url = `https://www.youtube.com/watch?v=${videoId}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Erro ao buscar página do vídeo');
-  const html = await res.text();
-
-  const playerResponseMatch = html.match(/var ytInitialPlayerResponse = (.*?});<\/script>/);
-  if (!playerResponseMatch) throw new Error('Não foi possível encontrar ytInitialPlayerResponse');
-
-  const playerResponse = JSON.parse(playerResponseMatch[1]);
-
-  const captions = playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-  if (!captions || captions.length === 0) throw new Error('Nenhuma legenda disponível');
-
-  const track = captions.find((t: any) => t.languageCode === langCode) || captions[0];
-  if (!track) throw new Error('Legenda no idioma solicitado não encontrada');
-
-  const transcriptUrl = track.baseUrl;
-
-  const transcriptRes = await fetch(transcriptUrl);
-  if (!transcriptRes.ok) throw new Error('Erro ao buscar transcrição');
-
-  const transcriptData = (await transcriptRes.json()) as TranscriptData;
-
-  const segments: TranscriptSegment[] = transcriptData.events
-    .filter((e) => e.segs)
-    .map((e) => ({
-      start: e.tStartMs / 1000,
-      duration: e.dDurationMs ? e.dDurationMs / 1000 : 0,
-      text: e.segs.map((s) => s.utf8).join(''),
-    }));
-
-  return segments;
-}
-
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<{ results: Result[] }>
-) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
-    res.status(405).json({ results: [] });
+    res.status(405).json({ error: 'Method not allowed' });
     return;
   }
 
@@ -89,33 +61,44 @@ export default async function handler(
     languageCode: string;
   };
 
-  const results: Result[] = [];
+  if (!videoIds || !Array.isArray(videoIds) || videoIds.length === 0) {
+    res.status(400).json({ error: 'videoIds is required' });
+    return;
+  }
+
+  const results: TranscriptResult[] = [];
 
   for (const videoId of videoIds) {
     try {
-      const title = await fetchVideoTitle(videoId);
-      const transcriptSegments = await fetchTranscript(videoId, languageCode);
+      const html = await fetchVideoPage(videoId);
+      const playerResponse = extractInitialPlayerResponse(html);
+      if (!playerResponse) {
+        results.push({ videoId, error: 'Unable to extract player response' });
+        continue;
+      }
+      const captionTracks =
+        playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
-      if (transcriptSegments.length === 0) {
-        throw new Error('Nenhuma legenda disponível para este idioma.');
+      if (!captionTracks || captionTracks.length === 0) {
+        results.push({ videoId, error: 'No captions available for this video' });
+        continue;
       }
 
-      const filename = sanitizeFilename(`${title}_${videoId}.txt`);
-      const content = transcriptSegments.map((s) => s.text).join('\n');
+      // Tenta encontrar legenda para o idioma solicitado (ex: 'pt', 'en')
+      const track = captionTracks.find(
+        (t: any) => t.languageCode === languageCode
+      ) || captionTracks[0]; // fallback para a primeira disponível
 
-      results.push({
-        videoId,
-        filename,
-        content,
-        error: null,
-      });
+      if (!track) {
+        results.push({ videoId, error: `No captions found for language ${languageCode}` });
+        continue;
+      }
+
+      // URL da legenda em formato XML
+      const transcript = await fetchTranscriptText(track.baseUrl);
+      results.push({ videoId, transcript });
     } catch (error: any) {
-      results.push({
-        videoId,
-        filename: null,
-        content: null,
-        error: error.message || 'Erro ao obter transcrição',
-      });
+      results.push({ videoId, error: error.message || 'Unknown error' });
     }
   }
 
