@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 
 type Result = {
   videoId: string;
+  title: string | null;
   filename: string | null;
   content: string | null;
   error: string | null;
@@ -14,13 +15,18 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const lang = navigator.language.slice(0, 2);
-    setLanguageCode(lang);
+    const lang = navigator.language.slice(0, 2).toLowerCase();
+    const supportedLangs = ['en', 'pt', 'es', 'fr', 'de'];
+    if (supportedLangs.includes(lang)) {
+      setLanguageCode(lang);
+    } else {
+      setLanguageCode('en');
+    }
   }, []);
 
   function parseVideoIds(text: string): string[] {
     const regex = /(?:v=|\/)([a-zA-Z0-9_-]{11})/g;
-    const ids = [];
+    const ids: string[] = [];
     let match;
     while ((match = regex.exec(text)) !== null) {
       ids.push(match[1]);
@@ -51,8 +57,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ videoIds, languageCode }),
       });
-
-      const data: { results: Result[] } = await res.json();
+      const data = await res.json();
       setResults(data.results);
     } catch (error) {
       alert('Erro ao chamar API');
@@ -103,21 +108,22 @@ export default function Home() {
       </button>
 
       <div style={{ marginTop: 20 }}>
-        {results.map(({ videoId, filename, content, error }) => (
-          <div key={videoId} style={{ marginBottom: 15, borderBottom: '1px solid #ccc' }}>
-            <strong>Vídeo:</strong> {videoId} <br />
+        {results.map(({ videoId, title, filename, content, error }) => (
+          <div
+            key={videoId}
+            style={{ marginBottom: 15, borderBottom: '1px solid #ccc', paddingBottom: 10 }}
+          >
+            <strong>Vídeo:</strong> {title || videoId} <br />
             {error ? (
               <span style={{ color: 'red' }}>Erro: {error}</span>
             ) : (
-              <>
-                <button
-                  onClick={() => {
-                    if (filename && content) downloadFile(filename, content);
-                  }}
-                >
-                  Baixar {filename}
-                </button>
-              </>
+              <button
+                onClick={() => {
+                  if (filename && content) downloadFile(filename, content);
+                }}
+              >
+                Baixar {filename}
+              </button>
             )}
           </div>
         ))}
