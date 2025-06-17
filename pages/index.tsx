@@ -1,80 +1,102 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+
+type Result = {
+  url: string;
+  success: boolean;
+  filename?: string;
+  transcript?: string;
+  error?: string;
+};
 
 export default function Home() {
   const [urls, setUrls] = useState('');
-  const [format, setFormat] = useState('txt');
-  const [result, setResult] = useState<any[]>([]);
+  const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false);
+  const [blobUrls, setBlobUrls] = useState<{ [key: number]: string }>({});
 
-  const handleSubmit = async (e: any) => {
+  useEffect(() => {
+    return () => {
+      Object.values(blobUrls).forEach(URL.revokeObjectURL);
+      setBlobUrls({});
+    };
+  }, [results]);
+
+  function createDownloadUrl(text: string) {
+    const blob = new Blob([text], { type: 'text/plain' });
+    return URL.createObjectURL(blob);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    setResult([]);
+    setResults([]);
+    setBlobUrls({});
 
-    const urlList = urls.split('\n').map(u => u.trim()).filter(Boolean);
+    const list = urls
+      .split('\n')
+      .map(u => u.trim())
+      .filter(Boolean)
+      .slice(0, 10);
 
-    if(urlList.length > 10){
-      alert('Limite máximo de 10 vídeos por vez');
-      setLoading(false);
-      return;
-    }
+    try {
+      const res = await fetch('/api/transcript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: list }),
+      });
 
-    const res = await fetch('/api/transcript', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls: urlList, format }),
-    });
+      const data: Result[] = await res.json();
+      setResults(data);
 
-    const data = await res.json();
-    if (res.ok) {
-      setResult(data.files);
-    } else {
-      alert(data.error);
+      const urlsBlob: { [key: number]: string } = {};
+      data.forEach((r, i) => {
+        if (r.success && r.transcript) {
+          urlsBlob[i] = createDownloadUrl(r.transcript);
+        }
+      });
+      setBlobUrls(urlsBlob);
+    } catch {
+      alert('Erro ao buscar transcrições');
     }
     setLoading(false);
-  };
+  }
 
   return (
-    <div className="min-h-screen p-8 bg-gray-50">
-      <h1 className="text-3xl mb-4">YouTube Transcript Tool</h1>
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <main style={{ padding: 20 }}>
+      <h1>Transcrição YouTube</h1>
+      <form onSubmit={handleSubmit}>
         <textarea
-          className="w-full border p-2"
-          rows={6}
-          placeholder="Cole até 10 links de vídeos do YouTube, um por linha"
+          rows={10}
           value={urls}
-          onChange={(e) => setUrls(e.target.value)}
+          onChange={e => setUrls(e.target.value)}
+          placeholder="Cole até 10 links de vídeos ou playlist, um por linha"
+          style={{ width: '100%', fontSize: 16 }}
         />
-        <div>
-          <label className="mr-4">Formato:</label>
-          <select value={format} onChange={(e) => setFormat(e.target.value)}>
-            <option value="txt">TXT</option>
-            <option value="md">Markdown</option>
-          </select>
-        </div>
-        <button type="submit" disabled={loading} className="bg-blue-500 text-white px-4 py-2">
-          {loading ? 'Processando...' : 'Gerar Transcrição'}
+        <button type="submit" disabled={loading} style={{ marginTop: 10 }}>
+          {loading ? 'Processando...' : 'Gerar transcrições'}
         </button>
       </form>
 
-      {result.length > 0 && (
-        <div className="mt-8">
-          <h2 className="text-2xl mb-4">Arquivos Gerados</h2>
-          <ul className="space-y-2">
-            {result.map((file) => (
-              <li key={file.filename}>
-                <a
-                  href={`data:text/plain;charset=utf-8,${encodeURIComponent(file.content)}`}
-                  download={file.filename}
-                  className="text-blue-600 underline"
-                >
-                  {file.filename}
+      <ul style={{ marginTop: 20 }}>
+        {results.map((r, i) => (
+          <li
+            key={i}
+            style={{ color: r.success ? 'green' : 'red', marginBottom: 8 }}
+          >
+            <strong>{r.url}</strong>: {' '}
+            {r.success ? (
+              <>
+                Transcrição pronta!{' '}
+                <a href={blobUrls[i]} download={r.filename}>
+                  {r.filename}
                 </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+              </>
+            ) : (
+              <>Erro: {r.error}</>
+            )}
+          </li>
+        ))}
+      </ul>
+    </main>
   );
 }

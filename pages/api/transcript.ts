@@ -1,33 +1,54 @@
-import { NextApiRequest, NextApiResponse } from 'next';
-import { fetchTranscript } from '../../lib/fetchTranscript';
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { getTranscriptAndInfo } from '../../lib/fetchTranscript';
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+type Result = {
+  url: string;
+  success: boolean;
+  filename?: string;
+  transcript?: string;
+  error?: string;
+};
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse<Result[]>
+) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    res.status(405).end();
+    return;
   }
 
-  const { urls, format } = req.body;
+  const { urls } = req.body as { urls: string[] };
+  const results: Result[] = [];
 
-  if (!Array.isArray(urls) || urls.length === 0) {
-    return res.status(400).json({ error: 'No URLs provided' });
+  for (const url of urls) {
+    try {
+      const { transcript, title, channel } = await getTranscriptAndInfo(url);
+
+      if (!transcript) {
+        results.push({ url, success: false, error: 'No transcript available' });
+        continue;
+      }
+
+      // Sanitiza título e canal para nome de arquivo
+      const sanitizedTitle = title.replace(/[\\\/:*?"<>|]/g, '').replace(/\s+/g, '_');
+      const sanitizedChannel = channel.replace(/[\\\/:*?"<>|]/g, '').replace(/\s+/g, '_');
+      const filename = `${sanitizedChannel}_${sanitizedTitle}.txt`;
+
+      results.push({
+        url,
+        success: true,
+        filename,
+        transcript,
+      });
+    } catch (e: any) {
+      results.push({
+        url,
+        success: false,
+        error: e.message || 'Unknown error',
+      });
+    }
   }
 
-  try {
-    const results = await Promise.all(
-      urls.map(async (url: string) => {
-        const data = await fetchTranscript(url);
-        const filename = `${data.channel}_${data.title}.${format === 'md' ? 'md' : 'txt'}`;
-        const content = format === 'md' ? `# ${data.title}\n\n${data.content}` : data.content;
-
-        return {
-          filename,
-          content,
-        };
-      })
-    );
-
-    res.status(200).json({ files: results });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
+  res.status(200).json(results);
 }
