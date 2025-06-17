@@ -47,14 +47,15 @@ export async function fetchTranscript(url: string, lang = 'pt') {
   const dom = new JSDOM(xml);
   const texts = dom.window.document.querySelectorAll('text');
 
-  const transcript = Array.from(texts).map(el =>
-    el.textContent
-      ?.replace(/&#39;/g, "'")
-      .replace(/&quot;/g, '"')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-  ).join('\n');
+  const transcript = Array.from(texts).map(el => {
+  const element = el as Element; // cast para Element
+  return element.textContent
+    ?.replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}).join('\n');
 
   return {
     title,
