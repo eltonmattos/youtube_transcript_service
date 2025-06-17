@@ -1,102 +1,101 @@
-import React, { useState, useEffect } from 'react';
-
-type Result = {
-  url: string;
-  success: boolean;
-  filename?: string;
-  transcript?: string;
-  error?: string;
-};
+import { useState, useEffect } from 'react';
 
 export default function Home() {
-  const [urls, setUrls] = useState('');
-  const [results, setResults] = useState<Result[]>([]);
+  const [language, setLanguage] = useState('en');
+  const [inputLinks, setInputLinks] = useState('');
+  const [results, setResults] = useState<{ link: string, status: string, transcript?: string }[]>([]);
   const [loading, setLoading] = useState(false);
-  const [blobUrls, setBlobUrls] = useState<{ [key: number]: string }>({});
 
   useEffect(() => {
-    return () => {
-      Object.values(blobUrls).forEach(URL.revokeObjectURL);
-      setBlobUrls({});
-    };
-  }, [results]);
+    const browserLang = navigator.language.slice(0, 2);
+    setLanguage(browserLang);
+  }, []);
 
-  function createDownloadUrl(text: string) {
-    const blob = new Blob([text], { type: 'text/plain' });
-    return URL.createObjectURL(blob);
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
+  const handleSubmit = async () => {
+    const links = inputLinks.split('\n').map(l => l.trim()).filter(l => l);
     setResults([]);
-    setBlobUrls({});
+    setLoading(true);
 
-    const list = urls
-      .split('\n')
-      .map(u => u.trim())
-      .filter(Boolean)
-      .slice(0, 10);
+    for (const link of links) {
+      const videoIdMatch = link.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+      const videoId = videoIdMatch ? videoIdMatch[1] : null;
 
-    try {
-      const res = await fetch('/api/transcript', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: list }),
-      });
+      if (!videoId) {
+        setResults(prev => [...prev, { link, status: 'Invalid YouTube link' }]);
+        continue;
+      }
 
-      const data: Result[] = await res.json();
-      setResults(data);
+      try {
+        const res = await fetch('/api/transcript', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoId, lang: language }),
+        });
 
-      const urlsBlob: { [key: number]: string } = {};
-      data.forEach((r, i) => {
-        if (r.success && r.transcript) {
-          urlsBlob[i] = createDownloadUrl(r.transcript);
+        const data = await res.json();
+
+        if (res.ok) {
+          setResults(prev => [...prev, { link, status: 'Success', transcript: data.transcript }]);
+        } else {
+          setResults(prev => [...prev, { link, status: data.error }]);
         }
-      });
-      setBlobUrls(urlsBlob);
-    } catch {
-      alert('Erro ao buscar transcrições');
+      } catch (err) {
+        setResults(prev => [...prev, { link, status: 'Request failed' }]);
+      }
     }
+
     setLoading(false);
-  }
+  };
 
   return (
-    <main style={{ padding: 20 }}>
-      <h1>Transcrição YouTube</h1>
-      <form onSubmit={handleSubmit}>
-        <textarea
-          rows={10}
-          value={urls}
-          onChange={e => setUrls(e.target.value)}
-          placeholder="Cole até 10 links de vídeos ou playlist, um por linha"
-          style={{ width: '100%', fontSize: 16 }}
-        />
-        <button type="submit" disabled={loading} style={{ marginTop: 10 }}>
-          {loading ? 'Processando...' : 'Gerar transcrições'}
-        </button>
-      </form>
+    <div className="container mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-4">YouTube Transcript Tool</h1>
 
-      <ul style={{ marginTop: 20 }}>
-        {results.map((r, i) => (
-          <li
-            key={i}
-            style={{ color: r.success ? 'green' : 'red', marginBottom: 8 }}
-          >
-            <strong>{r.url}</strong>: {' '}
-            {r.success ? (
-              <>
-                Transcrição pronta!{' '}
-                <a href={blobUrls[i]} download={r.filename}>
-                  {r.filename}
-                </a>
-              </>
-            ) : (
-              <>Erro: {r.error}</>
-            )}
-          </li>
-        ))}
-      </ul>
-    </main>
+      <div className="mb-4">
+        <label className="block mb-2">Language:</label>
+        <input
+          type="text"
+          value={language}
+          onChange={(e) => setLanguage(e.target.value)}
+          className="border p-2 w-32"
+        />
+      </div>
+
+      <div className="mb-4">
+        <label className="block mb-2">YouTube Links (one per line):</label>
+        <textarea
+          rows={5}
+          value={inputLinks}
+          onChange={(e) => setInputLinks(e.target.value)}
+          className="border p-2 w-full"
+        />
+      </div>
+
+      <button
+        onClick={handleSubmit}
+        disabled={loading}
+        className="bg-blue-600 text-white px-4 py-2 rounded"
+      >
+        {loading ? 'Processing...' : 'Get Transcripts'}
+      </button>
+
+      <div className="mt-6">
+        <h2 className="text-xl font-semibold mb-2">Results:</h2>
+        <ul>
+          {results.map((result, index) => (
+            <li key={index} className="mb-4 border p-2">
+              <p><strong>Video:</strong> {result.link}</p>
+              <p><strong>Status:</strong> {result.status}</p>
+              {result.transcript && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer">Show Transcript</summary>
+                  <pre className="bg-gray-100 p-2 whitespace-pre-wrap">{result.transcript}</pre>
+                </details>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
