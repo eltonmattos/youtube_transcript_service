@@ -1,22 +1,57 @@
+// pages/api/transcript.ts
+
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getTranscript } from '../../lib/fetchTranscript';
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+type TranscriptResult = {
+  videoId: string;
+  filename: string | null;
+  content: string | null;
+  error: string | null;
+};
+
+type TranscriptResponse = {
+  results: TranscriptResult[];
+};
+
+async function fetchTranscript(videoId: string, languageCode: string): Promise<{ filename: string; content: string }> {
+  // Aqui você coloca a lógica de scraping ou chamada API do YouTube para pegar o título e a legenda
+  // Exemplo fictício:
+  if (videoId === 'bad_video') throw new Error('No transcript available');
+  const filename = `channelname_${videoId}.txt`; // Exemplo de nome sanitizado
+  const content = `Transcript do vídeo ${videoId} em ${languageCode}`;
+  return { filename, content };
+}
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse<TranscriptResponse>
+) {
+  const { videoIds, languageCode } = req.body as { videoIds: string[]; languageCode: string };
+
+  if (!videoIds || !Array.isArray(videoIds)) {
+    return res.status(400).json({ results: [] });
   }
 
-  const { videoId, lang } = req.body;
+  const results: TranscriptResult[] = [];
 
-  if (!videoId || !lang) {
-    return res.status(400).json({ error: 'Missing videoId or lang parameter' });
+  for (const videoId of videoIds) {
+    try {
+      const { filename, content } = await fetchTranscript(videoId, languageCode);
+      results.push({
+        videoId,
+        filename,
+        content,
+        error: null,
+      });
+    } catch (error: any) {
+      results.push({
+        videoId,
+        filename: null,
+        content: null,
+        error: error.message || 'Error fetching transcript',
+      });
+    }
   }
 
-  const result = await getTranscript(videoId, lang);
-
-  if (result.success) {
-    res.status(200).json({ transcript: result.transcript });
-  } else {
-    res.status(404).json({ error: result.error });
-  }
+  return res.status(200).json({ results });
 }
