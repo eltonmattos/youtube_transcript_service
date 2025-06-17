@@ -3,9 +3,11 @@ import { useState, useEffect } from 'react';
 
 type Result = {
   videoId: string;
-  transcript?: string;
-  error?: string;
+  filename: string | null;
+  content: string | null;
+  error: string | null;
   title?: string;
+  channel?: string;
 };
 
 export default function Home() {
@@ -54,7 +56,7 @@ export default function Home() {
       });
       const data = await res.json();
       setResults(data.results);
-    } catch {
+    } catch (error) {
       alert('Erro ao chamar API');
     } finally {
       setLoading(false);
@@ -103,25 +105,20 @@ export default function Home() {
       </button>
 
       <div style={{ marginTop: 20 }}>
-        {results.map(({ videoId, transcript, error }) => (
-          <div
-            key={videoId}
-            style={{ marginBottom: 15, borderBottom: '1px solid #ccc', paddingBottom: 10 }}
-          >
-            <strong>Vídeo:</strong> {videoId}
+        {results.map(({ videoId, filename, content, error, title, channel }) => (
+          <div key={videoId} style={{ marginBottom: 15, borderBottom: '1px solid #ccc' }}>
+            <strong>{title ? `${title} — ${channel ?? 'Canal desconhecido'}` : videoId}</strong>
             <br />
             {error ? (
               <span style={{ color: 'red' }}>Erro: {error}</span>
             ) : (
-              <>
-                <button
-                  onClick={() => {
-                    if (transcript) downloadFile(`${videoId}.txt`, transcript);
-                  }}
-                >
-                  Baixar transcrição
-                </button>
-              </>
+              <button
+                onClick={() => {
+                  if (filename && content) downloadFile(filename, content);
+                }}
+              >
+                Baixar {filename}
+              </button>
             )}
           </div>
         ))}
